@@ -61,7 +61,7 @@ typedef struct {
 
 
 //! global variables
-float tau = 0.58;
+float tau = (float)0.58;
 int winWidth = 0, winHeight = 0;
 size_t VECTOR_SIZE;
 //! those data will be used in shaders
@@ -89,6 +89,13 @@ const char* saxpy_kernel =
 "    int index = get_global_id(0);          \n"
 "    C[index] = alpha* A[index] + B[index]; \n"
 "}                                          \n";
+
+void swap(cl_mem* a, cl_mem* b) {
+    cl_mem* tmp = a;
+    a = b;
+    b = tmp;
+}
+
 int main()
 {
     //! glfw: initialize and configure
@@ -107,7 +114,6 @@ int main()
         return -1;
     }
     glfwMakeContextCurrent(window);
-    glfwSetKeyCallback(window, key_callback);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     //! set vsync, make sure the simulation won't go too fast
     glfwSwapInterval(1);
@@ -165,8 +171,7 @@ int main()
     //------------------------------------------------------------------------
     //                              GL                                       =
     //------------------------------------------------------------------------
-    // 
-    // 
+
     //! ---------build and compile our shader program---------
     //! vertex shader and fragment shader
     Shader renderProgram("./vertex.vert", "./render.frag");
@@ -210,7 +215,7 @@ int main()
         return -1;
     }
 
-    float* textureData = new float[winWidth * winHeight * 4]; // rgbv
+    float* textureData = (float*)malloc(sizeof(float) * winWidth * winHeight * 4); // rgbv
     for (int y = 0; y < winHeight; y++)
     {
         for (int x = 0; x < winWidth; x++)
@@ -230,53 +235,30 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, winWidth, winHeight, 0, GL_RGBA, GL_FLOAT, textureData);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureFrame, 0);
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+        fprintf(stderr, "FrameBuffer bind fail.\n");
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     //------------------------------------------------------------------------
     //                              CL BUFFER                                =
     //------------------------------------------------------------------------
     // Create memory buffers on the device for each vector
-    cl_mem cl_boundaryData = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR, 3 * VECTOR_SIZE * sizeof(float), boundaryData, &clStatus);
-    cl_mem cl_lbmData = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR, 3 * 4 * VECTOR_SIZE * sizeof(float), lbmData, &clStatus);
-    /* cl_mem cl_state_texture2 = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 3 * VECTOR_SIZE * sizeof(float), state_texture2, &clStatus);
-     cl_mem cl_state_texture3 = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 3 * VECTOR_SIZE * sizeof(float), state_texture3, &clStatus);*/
+    cl_mem cl_boundaryData = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 3 * VECTOR_SIZE * sizeof(float), boundaryData, &clStatus);
+    cl_mem cl_lbmData = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 3 * 4 * VECTOR_SIZE * sizeof(float), lbmData, &clStatus);
+    cl_mem cl_lbmData_copy = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 3 * 4 * VECTOR_SIZE * sizeof(float), lbmData, &clStatus);
+    cl_mem cl_frame_gl = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 4 * VECTOR_SIZE * sizeof(float), textureData, &clStatus);
+    //cl_mem cl_state_texture2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 4 * VECTOR_SIZE * sizeof(float), textureData, &clStatus);
+    //cl_mem cl_state_texture3 = clCreateBuffer(context, cl_mem_use_host_ptr, 3 * vector_size * sizeof(float), state_texture3, &clstatus);
+    cl_mem* cl_lbmData_ptr = &cl_lbmData;
+    cl_mem* cl_lbmData_copy_ptr = &cl_lbmData_copy;
 
+   ////------------------------------------------------------------------------
+   ////                              DEBUG                                    =
+   ////------------------------------------------------------------------------
 
-    // //------------------------------------------------------------------------
-    // //                              DEBUG                                    =
-    // //------------------------------------------------------------------------
-    // // Create memory buffers on the device for each vector
-    //VECTOR_SIZE = 64;
-    //float* A = (float*)malloc(sizeof(float) * VECTOR_SIZE);
-    //float* B = (float*)malloc(sizeof(float) * VECTOR_SIZE);
-    //float* C = (float*)malloc(sizeof(float) * VECTOR_SIZE);
-    //for (int i = 0; i < VECTOR_SIZE; i++)
-    //{
-    //    A[i] = i;
-    //    B[i] = VECTOR_SIZE - i;
-    //    C[i] = 0;
-    //}
-    //A[0] = 8;
-    //cl_mem A_clmem = clCreateBuffer(context, CL_MEM_READ_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
-    //cl_mem B_clmem = clCreateBuffer(context, CL_MEM_READ_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
-    //cl_mem C_clmem = clCreateBuffer(context, CL_MEM_WRITE_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
-    //cl_frame = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, textureFrame, &clStatus);
-
-
-    //// Copy the Buffer A and B to the device
-    //clStatus = clEnqueueWriteBuffer(params.q, A_clmem, CL_TRUE, 0, VECTOR_SIZE * sizeof(float), A, 0, NULL, NULL);
-    //clStatus = clEnqueueWriteBuffer(params.q, B_clmem, CL_TRUE, 0, VECTOR_SIZE * sizeof(float), B, 0, NULL, NULL);
-
-    //cl_program program = clCreateProgramWithSource(context, 1, (const char**)&saxpy_kernel, NULL, &clStatus);
-
-    //clStatus = clBuildProgram(program, 1, params.d, NULL, NULL, NULL);
-    //params.k = clCreateKernel(program, "saxpy_kernel", &clStatus);
-    ////------------------------------------------------------------------------
-    ////                              DEBUG                                    =
-    ////------------------------------------------------------------------------
-
-    // Create a program from the kernel source
-    // First step is to load the kernel in a local memory
+   // Create a program from the kernel source
+   // First step is to load the kernel in a local memory
     FILE* f = fopen("./lbm.cl", "rb");
     fseek(f, 0, SEEK_END);
     size_t programSize = ftell(f);
@@ -288,7 +270,6 @@ int main()
     fclose(f);
 
     cl_program program = clCreateProgramWithSource(context, 1, (const char**)&programBuffer, NULL, &clStatus);
-    clStatus = clBuildProgram(program, 1, params.d, NULL, NULL, NULL);
     if (clStatus)
     {
         printf("Error: Failed to read source! %d\n", clStatus);
@@ -312,8 +293,12 @@ int main()
     }
 
     // copy from gl buffer
-    cl_frame = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, textureFrame, &clStatus);
-
+    cl_frame = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0, textureFrame, &clStatus);
+    if (clStatus)
+    {
+        printf("Error: Failed to fetch from texture buffer! %d\n", clStatus);
+        return EXIT_FAILURE;
+    }
 
     //! set uniform variables for render.frag
     renderProgram.use(); // don't forget to activate/use the shader before setting uniforms!
@@ -322,6 +307,7 @@ int main()
 
     //! render loop
     // ------------
+    int iter = 0;
     while (!glfwWindowShouldClose(window))
     {
         //! input
@@ -340,25 +326,26 @@ int main()
             printf("Error: Failed to fetch gl object! %d\n", clStatus);
             return EXIT_FAILURE;
         }
+
         // Set the arguments of the kernel
-        clStatus = clSetKernelArg(params.k, 0, sizeof(cl_mem), (void*)&cl_lbmData);
+        clStatus = clSetKernelArg(params.k, (iter + 0) % 2, sizeof(cl_mem), (void*)&cl_lbmData);
+        clStatus = clSetKernelArg(params.k, (iter + 1) % 2, sizeof(cl_mem), (void*)&cl_lbmData_copy);
+        clStatus |= clSetKernelArg(params.k, 2, sizeof(cl_mem), (void*)&cl_boundaryData);
+        clStatus |= clSetKernelArg(params.k, 3, sizeof(cl_mem), (void*)&cl_frame_gl);
+        //clStatus |= clSetKernelArg(params.k, 2, sizeof(cl_mem), (void*)&cl_frame);
+        clStatus |= clSetKernelArg(params.k, 4, sizeof(int), &winWidth);
+        clStatus |= clSetKernelArg(params.k, 5, sizeof(int), &winHeight);
+        clStatus |= clSetKernelArg(params.k, 6, sizeof(float), &tau);
         if (clStatus)
         {
-            printf("Error: Failed to set kernel arguments! %d\n", clStatus);
+            printf("Error: Failed to set kernel arguments 3! %d\n", clStatus);
             return EXIT_FAILURE;
         }
-        clStatus |= clSetKernelArg(params.k, 1, sizeof(cl_mem), (void*)&cl_boundaryData);
-        clStatus |= clSetKernelArg(params.k, 2, sizeof(cl_mem), (void*)&cl_frame);
-        clStatus |= clSetKernelArg(params.k, 3, sizeof(int), &winWidth);
-        clStatus |= clSetKernelArg(params.k, 4, sizeof(int), &winHeight);
-        clStatus |= clSetKernelArg(params.k, 5, sizeof(float), &tau);
-        clStatus |= clSetKernelArg(params.k, 6, sizeof(float), &e_global);
-        
 
         // Execute the OpenCL kernel on the list
-        size_t global_size = VECTOR_SIZE; //
+        const size_t global_size[] = { winWidth, winHeight }; //
         size_t local_size = 64;           //
-        clStatus = clEnqueueNDRangeKernel(params.q, params.k, 2, NULL, &global_size, NULL, 0, NULL, NULL);
+        clStatus = clEnqueueNDRangeKernel(params.q, params.k, 2, NULL, (const size_t*)&global_size, NULL, 0, NULL, NULL);
         if (clStatus)
         {
             printf("Error: Failed to execute kernel! %d\n", clStatus);
@@ -366,51 +353,34 @@ int main()
         }
 
         // Clean up and wait for all the comands to complete.
+        clStatus = clEnqueueReleaseGLObjects(params.q, 1, &cl_frame, 0, 0, 0);
+        if (clStatus)
+        {
+            printf("Error: Release gl object fail %d\n", clStatus);
+            return EXIT_FAILURE;
+        }
+        
+        // swap(cl_lbmData_ptr, cl_lbmData_copy_ptr);
         clStatus = clFlush(params.q);
         clStatus = clFinish(params.q);
-        clStatus = clEnqueueReleaseGLObjects(params.q, 1, &cl_frame, 0, 0, 0);
+        iter++;
 
-        //// Set the arguments of the kernel
-        //// Set the arguments of the kernel
-        //float alpha = 2.0;
-        //clStatus = clEnqueueAcquireGLObjects(params.q, 1, &cl_frame, 0, 0, 0);
-        //if (clStatus)
-        //{
-        //    printf("Error: Failed to fetch gl object! %d\n", clStatus);
-        //    return EXIT_FAILURE;
-        //}
-        //clStatus = clSetKernelArg(params.k, 0, sizeof(float), (void*)&alpha);
-        //clStatus |= clSetKernelArg(params.k, 1, sizeof(cl_mem), (void*)&A_clmem);
-        //clStatus |= clSetKernelArg(params.k, 2, sizeof(cl_mem), (void*)&B_clmem);
-        //clStatus |= clSetKernelArg(params.k, 3, sizeof(cl_mem), (void*)&C_clmem);
-        //if (clStatus)
-        //{
-        //    printf("Error: Failed to set kernel arguments!\n");
-        //    return EXIT_FAILURE;
-        //}
+        //------------------------------------------------------------------------
+        //                              CL BUFFER                                =
+        //------------------------------------------------------------------------
+        clStatus = clEnqueueReadBuffer(params.q, cl_frame_gl, CL_TRUE, 0, 4 * VECTOR_SIZE * sizeof(float), textureData, 0, NULL, NULL);
+        glGenTextures(1, &textureFrame);
+        glBindTexture(GL_TEXTURE_2D, textureFrame);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, winWidth, winHeight, 0, GL_RGBA, GL_FLOAT, textureData);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureFrame, 0);
+        //------------------------------------------------------------------------
+        //                              CL BUFFER                                =
+        //------------------------------------------------------------------------
 
-
-        //// Execute the OpenCL kernel on the list
-        //size_t global_size = VECTOR_SIZE; // Process the entire lists
-        //size_t local_size = 64;           // Process one item at a time
-        //clStatus = clEnqueueNDRangeKernel(params.q, params.k, 1, NULL, &global_size, &local_size, 0, NULL, NULL);
-        //if (clStatus)
-        //{
-        //    printf("Error: Failed to execute kernel!\n");
-        //    return EXIT_FAILURE;
-        //}
-
-        //clStatus = clEnqueueReadBuffer(params.q, C_clmem, CL_TRUE, 0, sizeof(float) * VECTOR_SIZE, C, 0, NULL, NULL);
-
-        //// Read the cl memory C_clmem on device to the host variable C
-        //// Clean up and wait for all the comands to complete.
-        //clStatus = clFlush(params.q);
-        //clStatus = clFinish(params.q);
-
-        //for (int i = 0; i < VECTOR_SIZE; i++)
-        //    printf("%f * %f + %f = %f\n", alpha, A[i], B[i], C[i]);
-
-        exit(1);
         renderProgram.use();
         glBindVertexArray(VAO);
         glActiveTexture(GL_TEXTURE0);
@@ -418,6 +388,8 @@ int main()
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, textureFrame);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+
 
         //! glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         glfwSwapBuffers(window);
@@ -437,7 +409,7 @@ bool initFluidState(const char* imagePath)
     stbi_set_flip_vertically_on_load(true);
     unsigned char* maskData = stbi_load(imagePath, &winWidth, &winHeight, &nrChannels, 0);
     cout << "texture image (HxW):" << winHeight << " x " << winWidth << endl;
-    boundaryData = new float[winWidth * winHeight * 3]; // 3 channels
+    boundaryData = (float*)malloc(sizeof(float) * winWidth * winHeight * 3); // 3 channels
     VECTOR_SIZE = winWidth * winHeight;
     if (boundaryData == NULL) {
         cout << "Unable to allocate memory!" << endl;
@@ -462,9 +434,9 @@ bool initFluidState(const char* imagePath)
                 unsigned char r = maskData[3 * index + 0];
                 unsigned char g = maskData[3 * index + 1];
                 unsigned char b = maskData[3 * index + 2];
-                boundaryData[3 * index + 0] = r / 255.0;
-                boundaryData[3 * index + 1] = g / 255.0;
-                boundaryData[3 * index + 2] = b / 255.0;
+                boundaryData[3 * index + 0] = (float)r / 255.0;
+                boundaryData[3 * index + 1] = (float)g / 255.0;
+                boundaryData[3 * index + 2] = (float)b / 255.0;
             }
         }
     }
@@ -479,7 +451,7 @@ bool initFluidState(const char* imagePath)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, winWidth, winHeight, 0, GL_RGB, GL_FLOAT, boundaryData);
 
     //! initialize the data buffers for LBM simulation use
-    lbmData = new float[winWidth * winHeight * 12]; // 12 channels
+    lbmData = (float*)malloc(sizeof(float) * winWidth * winHeight * 12); // 12 channels
 
     //! initial state of the lbmBuffer[] for simulation
     //!	macroscopic velocity: <ux,uy>
@@ -497,15 +469,15 @@ bool initFluidState(const char* imagePath)
     {
         for (int x = 0; x < winWidth; x++)
         {
-            float ux = 0.3;
-            float uy = 0.06;
-            float rho = 1.0;
+            float ux = (float)0.3;
+            float uy = (float)0.06;
+            float rho = (float)1.0;
             float uu_dot = (ux * ux + uy * uy);
             float f[9];
             for (int i = 0; i < 9; i++)
             {
                 float eu_dot = (e[i][0] * ux + e[i][1] * uy);
-                f[i] = w[i] * rho * (1.0f + 3.0f * eu_dot + 4.5f * eu_dot * eu_dot - 1.5f * uu_dot);
+                f[i] = w[i] * rho * (1.0f + 3.0f * eu_dot + 4.5f * eu_dot * eu_dot - 1.5f * uu_dot) * rand();
             }
             int index = y * winWidth + x;
             //! f1~f4
