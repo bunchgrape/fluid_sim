@@ -17,15 +17,4 @@ void main()
 	vec4 FragColorMask = texture(boundary_texture, texCoord);
 
 	FragColor = FragColorFluid;
-
-	//for (int i = 0; i < 3; i++) {
-	//	 FragColor[i] = min(FragColorFluid[i], FragColorMask[i]);
-	//}
-
-	// float mask_color = texture2D(boundary_texture, pos).x;
-    // if (mask_color > 0.0){
-    //     FragColor =  FragColorFluid;
-    // }else {
-    //     FragColor =  FragColorMask;
-    // }
 }

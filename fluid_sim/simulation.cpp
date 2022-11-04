@@ -23,7 +23,7 @@ unsigned int lbmBoundary;
 float* lbmData[3];
 
 
-int main()
+int main1()
 {
 	//! glfw: initialize and configure
 	glfwInit();
