@@ -1,9 +1,8 @@
-
-
-__kernel void lbm(__global float* state_texture,
-					__global float* boundary_texture, 
-					__global float4* textureData,
-					int winWidth, int winHeight, float tau) {
+__kernel  void lbm_kernel(__global float* state_texture,
+						__global float* boundary_texture, 
+						__global float4* textureData,
+						int winWidth, int winHeight, float tau,
+						float* e_global) {
 
 	int x = get_global_id(0);
     int y = get_global_id(1);
@@ -12,15 +11,10 @@ __kernel void lbm(__global float* state_texture,
 
 	float e[9][2];	//	9 lattice velocities
     float w[9];	//	9 lattice constants
-	e[0] = { 0, 0};
-	e[1] = { 1, 0};
-	e[2] = { 0, 1};
-	e[3] = {-1, 0};
-	e[4] = { 0,-1};
-	e[5] = { 1, 1};
-	e[6] = {-1, 1};
-	e[7] = {-1,-1};
-	e[8] = { 1,-1};
+	for (int i = 0; i < 9; i++) {
+		e[i][0] = e_global[i * 2 + 0];
+		e[i][1] = e_global[i * 2 + 1];
+	}
 
 	w[0] = 4.0/9.0;
 	w[1] = 1.0/9.0;
@@ -50,7 +44,6 @@ __kernel void lbm(__global float* state_texture,
 
 	// streaming
 	float f_star[9];
-	f_star[0] = texture(state_texture3, pos)[0];
 	f_star[0] = state_texture[12 * index + 8];
 	for (int i = 1; i < 9; i++) {
 		int offset = (i - 1) % 12;
@@ -72,7 +65,8 @@ __kernel void lbm(__global float* state_texture,
 		ux += e[i][0] * f_star[i];
 		uy += e[i][1] * f_star[i];
 	}
-	u /= rho;
+	ux /= rho;
+	uy /= rho;
 
 	// update f equilibrium
 	float uu_dot = (ux * ux + uy * uy);
@@ -88,17 +82,18 @@ __kernel void lbm(__global float* state_texture,
 		ff[i] = f_star[i] - (f_star[i] - f_eq[i]) / tau;
 	}
 
-    FragColor[0] = vec4( ff[1], ff[2], ff[3], ff[4] );
-    FragColor[1] = vec4( ff[5], ff[6], ff[7], ff[8] );
-    FragColor[2] = vec4( ff[0], rho, u.x, u.y );    
 		  
 	//state_texture[12 * index] = (float4)(ff[1], ff[2], ff[3], ff[4]);
 	//state_texture[12 * index + 4] = (float4)(ff[5], ff[6], ff[7], ff[8]);
 	//state_texture[12 * index + 8] = (float4)(ff[0], rho, ux, uy);
 
-	state_texture[12 * index] = (float4)(0, 0, 0, 0);
-	state_texture[12 * index + 4] = (float4)(0, 0,0 ,0);
-	state_texture[12 * index + 8] = (float4)(ff[0], rho, ux, uy);
+	for (int i = 0; i < 8; i++) {
+		state_texture[12 * index + i] = 0;
+	}
+	state_texture[12 * index +  9] = ff[0];
+	state_texture[12 * index + 10] = rho;
+	state_texture[12 * index + 11] = ux;
+	state_texture[12 * index + 12] = uy;
 
 	// textureData[4 *	index] = (float4)(ff[0], rho, ux, uy);
 
