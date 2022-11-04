@@ -20,20 +20,6 @@ using namespace std;
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow* window);
 
-
-//OpenCL kernel which is run for every work item created.
-const char* saxpy_kernel =
-"__kernel                                   \n"
-"void saxpy_kernel(float alpha,     \n"
-"                  __global float *A,       \n"
-"                  __global float *B,       \n"
-"                  __global float *C)       \n"
-"{                                          \n"
-"    //Get the index of the work-item       \n"
-"    int index = get_global_id(0);          \n"
-"    A[index] = 7; \n"
-"}                                          \n";
-
 // Simple compute kernel which computes the square of an input array 
 //
 const char* KernelSource = "\n" \
@@ -50,199 +36,117 @@ const char* KernelSource = "\n" \
 
 ////////////////////////////////////////////////////////////////////////////////
 #define DATA_SIZE (1023)
+#define VECTOR_SIZE (32)
+
+//OpenCL kernel which is run for every work item created.
+const char* saxpy_kernel =
+"__kernel                                   \n"
+"void saxpy_kernel(float alpha,     \n"
+"                  __global float *A,       \n"
+"                  __global float *B,       \n"
+"                  __global float *C)       \n"
+"{                                          \n"
+"    //Get the index of the work-item       \n"
+"    int index = get_global_id(0);          \n"
+"    C[index] = alpha* A[index] + B[index]; \n"
+"}                                          \n";
 
 int main(void) {
-    int err;                            // error code returned from api calls
-
-    float data[DATA_SIZE];              // original data set given to device
-    float results[DATA_SIZE];           // results returned from device
-    unsigned int correct;               // number of correct results returned
-
-    size_t global;                      // global domain size for our calculation
-    size_t local;                       // local domain size for our calculation
-
-    cl_device_id device_id;             // compute device id 
-    cl_context context;                 // compute context
-    cl_command_queue commands;          // compute command queue
-    cl_program program;                 // compute program
-    cl_kernel kernel;                   // compute kernel
-
-    cl_mem input;                       // device memory used for the input array
-    cl_mem output;                      // device memory used for the output array
-
-    // Fill our data set with random float values
-    //
-    unsigned int data_size = DATA_SIZE;
-    int i = 0;
-    unsigned int count = DATA_SIZE;
-    unsigned int v = count;
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    v++;
-    //count = v;
-
-    cout << "chunk size " << count << endl;
-
-    for (i = 0; i < data_size; i++)
-        data[i] = rand() / (float)RAND_MAX;
-
+    int i;
+    // Allocate space for vectors A, B and C
+    float alpha = 2.0;
+    float* A = (float*)malloc(sizeof(float) * VECTOR_SIZE);
+    float* B = (float*)malloc(sizeof(float) * VECTOR_SIZE);
+    float* C = (float*)malloc(sizeof(float) * VECTOR_SIZE);
+    for (i = 0; i < VECTOR_SIZE; i++)
+    {
+        A[i] = i;
+        B[i] = VECTOR_SIZE - i;
+        C[i] = 0;
+    }
 
     // Get platform and device information
     cl_platform_id* platforms = NULL;
     cl_uint     num_platforms;
-
-
     //Set up the Platform
     cl_int clStatus = clGetPlatformIDs(0, NULL, &num_platforms);
-    cout << clStatus << endl;
-    cout << " num platform " << num_platforms << endl;
-
     platforms = (cl_platform_id*)
         malloc(sizeof(cl_platform_id) * num_platforms);
     clStatus = clGetPlatformIDs(num_platforms, platforms, NULL);
-    cout << clStatus << endl;
 
-    // Connect to a compute device
-    //
-    cl_uint num_devices = 0;
-    err = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 1, &device_id, &num_devices);
-    if (num_devices == 0)
-        err = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, 1, &device_id, &num_devices);
-    if (num_devices == 0)
-    {
-        printf("Error: Failed to create a device group!\n");
-        return EXIT_FAILURE;
-    }
+    //Get the devices list and choose the device you want to run on
+    cl_device_id* device_list = NULL;
+    cl_uint           num_devices;
 
-    // Create a compute context 
-    //
-    context = clCreateContext(0, 1, &device_id, NULL, NULL, &err);
-    if (!context)
-    {
-        printf("Error: Failed to create a compute context!\n");
-        return EXIT_FAILURE;
-    }
+    clStatus = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
+    device_list = (cl_device_id*)
+        malloc(sizeof(cl_device_id) * num_devices);
+    clStatus = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_GPU, num_devices, device_list, NULL);
 
-    // Create a command commands
-    //
-    commands = clCreateCommandQueueWithProperties(context, device_id, 0, &err);
-    if (!commands)
-    {
-        printf("Error: Failed to create a command commands!\n");
-        return EXIT_FAILURE;
-    }
+    // Create one OpenCL context for each device in the platform
+    cl_context context;
+    context = clCreateContext(NULL, num_devices, device_list, NULL, NULL, &clStatus);
 
-    // Create the compute program from the source buffer
-    //
-    program = clCreateProgramWithSource(context, 1, (const char**)&KernelSource, NULL, &err);
-    if (!program)
-    {
-        printf("Error: Failed to create compute program!\n");
-        return EXIT_FAILURE;
-    }
+    // Create a command queue
+    cl_command_queue command_queue = clCreateCommandQueueWithProperties(context, device_list[0], 0, &clStatus);
 
-    // Build the program executable
-    //
-    err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-    if (err != CL_SUCCESS)
-    {
-        size_t len;
-        char buffer[2048];
+    // Create memory buffers on the device for each vector
+    cl_mem A_clmem = clCreateBuffer(context, CL_MEM_READ_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
+    cl_mem B_clmem = clCreateBuffer(context, CL_MEM_READ_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
+    cl_mem C_clmem = clCreateBuffer(context, CL_MEM_WRITE_ONLY, VECTOR_SIZE * sizeof(float), NULL, &clStatus);
 
-        printf("Error: Failed to build program executable!\n");
-        clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
-        printf("%s\n", buffer);
-        exit(1);
-    }
+    // Copy the Buffer A and B to the device
+    clStatus = clEnqueueWriteBuffer(command_queue, A_clmem, CL_TRUE, 0, VECTOR_SIZE * sizeof(float), A, 0, NULL, NULL);
+    clStatus = clEnqueueWriteBuffer(command_queue, B_clmem, CL_TRUE, 0, VECTOR_SIZE * sizeof(float), B, 0, NULL, NULL);
 
-    // Create the compute kernel in the program we wish to run
-    //
-    kernel = clCreateKernel(program, "square", &err);
-    if (!kernel || err != CL_SUCCESS)
-    {
-        printf("Error: Failed to create compute kernel!\n");
-        exit(1);
-    }
+    // Create a program from the kernel source
+    cl_program program = clCreateProgramWithSource(context, 1, (const char**)&saxpy_kernel, NULL, &clStatus);
 
-    // Create the input and output arrays in device memory for our calculation
-    //
-    input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * count, NULL, NULL);
-    output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * count, NULL, NULL);
-    if (!input || !output)
-    {
-        printf("Error: Failed to allocate device memory!\n");
-        exit(1);
-    }
+    // Build the program
+    clStatus = clBuildProgram(program, 1, device_list, NULL, NULL, NULL);
 
-    // Write our data set into the input array in device memory 
-    //
-    err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float) * count, data, 0, NULL, NULL);
-    if (err != CL_SUCCESS)
-    {
-        printf("Error: Failed to write to source array!\n");
-        exit(1);
-    }
+    // Create the OpenCL kernel
+    cl_kernel kernel = clCreateKernel(program, "saxpy_kernel", &clStatus);
 
-    // Set the arguments to our compute kernel
-    //
-    err = 0;
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
-    err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
-    err |= clSetKernelArg(kernel, 2, sizeof(unsigned int), &data_size);
-    if (err != CL_SUCCESS)
-    {
-        printf("Error: Failed to set kernel arguments! %d\n", err);
-        exit(1);
-    }
+    // Set the arguments of the kernel
+    clStatus = clSetKernelArg(kernel, 0, sizeof(float), (void*)&alpha);
+    clStatus = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void*)&A_clmem);
+    clStatus = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void*)&B_clmem);
+    clStatus = clSetKernelArg(kernel, 3, sizeof(cl_mem), (void*)&C_clmem);
 
-    // Get the maximum work group size for executing the kernel on the device
-    //
-    err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
-    if (err != CL_SUCCESS)
-    {
-        printf("Error: Failed to retrieve kernel work group info! %d\n", err);
-        exit(1);
-    }
-
-    // Execute the kernel over the entire range of our 1d input data set
-    // using the maximum number of work group items for this device
-    //
-    global = v;
-    err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
-    if (err)
+    // Execute the OpenCL kernel on the list
+    size_t global_size = VECTOR_SIZE; // Process the entire lists
+    size_t local_size = 64;           // Process one item at a time
+    clStatus = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, &global_size, &local_size, 0, NULL, NULL);
+    if (clStatus)
     {
         printf("Error: Failed to execute kernel!\n");
         return EXIT_FAILURE;
     }
 
-    // Wait for the command commands to get serviced before reading back results
-    //
-    clFinish(commands);
+    // Read the cl memory C_clmem on device to the host variable C
+    clStatus = clEnqueueReadBuffer(command_queue, C_clmem, CL_TRUE, 0, VECTOR_SIZE * sizeof(float), C, 0, NULL, NULL);
 
-    // Read back the results from the device to verify the output
-    //
-    err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float) * count, results, 0, NULL, NULL);
-    if (err != CL_SUCCESS)
-    {
-        printf("Error: Failed to read output array! %d\n", err);
-        exit(1);
-    }
+    // Clean up and wait for all the comands to complete.
+    clStatus = clFlush(command_queue);
+    clStatus = clFinish(command_queue);
 
-    // Validate our results
-    //
-    correct = 0;
-    for (i = 0; i < data_size; i++)
-    {
-        if (results[i] == data[i] * data[i])
-            correct++;
-    }
+    // Display the result to the screen
+    for (i = 0; i < VECTOR_SIZE; i++)
+        printf("%f * %f + %f = %f\n", alpha, A[i], B[i], C[i]);
 
-    // Print a brief summary detailing the results
-    //
-    printf("Computed '%d/%d' correct values!\n", correct, count);
+    // Finally release all OpenCL allocated objects and host buffers.
+    clStatus = clReleaseKernel(kernel);
+    clStatus = clReleaseProgram(program);
+    clStatus = clReleaseMemObject(A_clmem);
+    clStatus = clReleaseMemObject(B_clmem);
+    clStatus = clReleaseMemObject(C_clmem);
+    clStatus = clReleaseCommandQueue(command_queue);
+    clStatus = clReleaseContext(context);
+    free(A);
+    free(B);
+    free(C);
+    free(platforms);
+    free(device_list);
     return 0;
 }
